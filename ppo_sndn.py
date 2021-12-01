@@ -4,11 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
+from preproc import train_dataset, train_dataloader, val_dataloader, val_dataset, test_dataloader, test_dataset
+from denoise_model import unet_model, ae_model
 
-filter_size = [3, 3]
-data_size = [1000, 60]
 filter = [
-    
+    unet_model, ae_model
 ]
 
 
@@ -112,71 +112,58 @@ class PPO(nn.Module):
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
-        
-def make_filter(ones, filt, x, y):
-    for i in range(filter_size[0]):
-        for j in range(filter_size[1]):
-            ones[x + i][y + j] = filt[i][j]
-    return ones
+
+def step(s, a, clean, time_step):
+    start_point = time_step * 200
+    filter_model = filter[a].predict(s[:, start_point:start_point+200])
+
+    if time_step > 0:
+        filt = np.ones((1025, start_point))
+        filt = np.append(filt, filter_model, dim=-1)
+    else:
+        filt = filter_model
+
+    if time_step < 4:
+        np.append(filt, np.ones((1025, (4 - time_step) * 200)))
+
+    s_prime = s * filt
+
+    time_step += 1
+    if time_step >= 5:
+        time_step = 0
+        r = -1 * np.sqrt(np.mean((s - clean) ** 2))
+        done = True
+    else:
+        r = 0
+        done = False
+
+    return s_prime, r, done, time_step
+    
     
 def main():
-    # Dataset
-    original_dataset = np.random.randn(300, 1000, 60)
-    noised_dataset = np.random.randn(300, 1000, 60)
-
-    done_repeat = 20
-    len_data = original_dataset.size[0]
-
     model = PPO()
     score = 0.0
     print_interval = 20
 
+    time_step = 0
     idx = 0
     for n_epi in range(10000):
         done = False
-        x = 0
-        y = 0
-        filtered = 0
-        s = noised_dataset[idx]
-        label = noised_dataset[idx]
-
         while not done:
             for t in range(T_horizon):
                 prob = model.pi(torch.from_numpy(s).float())
                 m = Categorical(prob)
                 a = m.sample().item()
-                selected_filter = filter[a]
 
-                # s_prime, r, done = step(a)
-                filt = make_filter(np.ones(data_size), selected_filter, x, y)
-                s_prime = s * filt
-                r = 0
-
-                if x >= data_size[0] - filter_size[0] and y >= data_size[1] - filter_size[1] :
-                    r = -1 * np.mean(np.abs(label - s_prime))
-                    filtered += 1
-                    if filtered >= done_repeat:
-                        filtered = 0
-                        done = True
-                    else:
-                        done = False
-                        x = 0
-                        y = 0
-                else:
-                    x = (x + 1) % (data_size[0] - filter_size[0])
-                    y = (y + 1) % (data_size[1] - filter_size[1])
-
+                s_prime, r, done, time_step = step(s, a, time_step)
 
                 model.put_data((s, a, r, s_prime, prob[a].item(), done))
                 s = s_prime
 
-                if done:
-                    idx = (idx + 1) % len_data
-                    s = original_dataset[idx]
-
                 score += r
                 if done:
-                    break
+                    idx = (idx + 1) % len(train_dataset)
+                    train_dataset[idx][0].numpy()
 
             model.train_net()
 

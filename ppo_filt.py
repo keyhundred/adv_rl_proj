@@ -4,13 +4,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
-from preproc import train_dataset, train_dataloader, val_dataloader, val_dataset, test_dataloader, test_dataset
-from denoise_model import unet_model, ae_model
+from preproc_mel import train_dataset
 
-filter_size = [5, 5]
-data_size = [128, 1000]
-filter = [
-    
+data_size = [128, 100]
+action = [
+    -5,
+    -2,
+    -1,
+    -0.1,
+    -0.001,
+    -0.0001,
+    0,
+    0.0001,
+    0.001,
+    0.1,
+    1,
+    2,
+    5,
 ]
 
 # Hyperparameters
@@ -25,69 +35,60 @@ class PPO(nn.Module):
     def __init__(self):
         super(PPO, self).__init__()
         self.data = []
-        self.n_action = len(filter)
-        
-        self.fc1   = nn.Linear(4,256)
-        self.fc_pi = nn.Linear(256,self.n_action)
-        self.fc_v  = nn.Linear(256,1)
+        self.n_action = len(action)
 
-        self.fc_inv = nn.Linear(256*2, self.n_action)
-        self.ce = nn.CrossEntropyLoss()
+        self.latent = nn.Sequential(
+            nn.Conv2d(1, 16, 3, padding='same'),
+            nn.Conv2d(16, 16, 3, padding='same'),
+            nn.Conv2d(16, 16, 3, padding='same'),
+            nn.Conv2d(16, 16, 3, padding='same'),
+        )
+        self.fc_pi = nn.Conv2d(16, 11, 3, padding='same')
+        self.fc_v  = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(16*128*100, 1)
+        )
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
-    def pi(self, x, softmax_dim = 0):
-        x = F.relu(self.fc1(x))
+    def pi(self, x, softmax_dim = 1):
+        x = F.relu(self.latent(x))
         x = self.fc_pi(x)
         prob = F.softmax(x, dim=softmax_dim)
         return prob
-    
+
     def v(self, x):
-        x = F.relu(self.fc1(x))
+        x = F.relu(self.latent(x))
         v = self.fc_v(x)
         return v
 
-    def inv(self, state, next_state):
-        s = self.fc1(state)
-        sp = self.fc1(next_state)
-        joint_state = torch.cat([s, sp], dim=1)
-        pred_action = torch.relu(self.fc_inv(joint_state))
-        return pred_action
-      
     def put_data(self, transition):
         self.data.append(transition)
-        
+
     def make_batch(self):
         s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, done_lst = [], [], [], [], [], []
         for transition in self.data:
             s, a, r, s_prime, prob_a, done = transition
-            
-            s_lst.append(s)
-            a_lst.append([a])
+
+            s_lst.append(s[0].numpy())
+            a_lst.append(a)
             r_lst.append([r])
-            s_prime_lst.append(s_prime)
+            s_prime_lst.append(s_prime[0].numpy())
             prob_a_lst.append([prob_a])
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
-            
+
         s,a,r,s_prime,done_mask, prob_a = torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
                                           torch.tensor(r_lst), torch.tensor(s_prime_lst, dtype=torch.float), \
                                           torch.tensor(done_lst, dtype=torch.float), torch.tensor(prob_a_lst)
         self.data = []
         return s, a, r, s_prime, done_mask, prob_a
-        
+
     def train_net(self):
         s, a, r, s_prime, done_mask, prob_a = self.make_batch()
 
-        USE_INV = False
-        INV_COEF = 0.1
-
         for i in range(K_epoch):
-            if USE_INV:
-                pred_action = self.inv(s, s_prime)
-                inv_loss = self.ce(pred_action, a.reshape((-1,))).mean()
-
-            td_target = r + gamma * self.v(s_prime) * done_mask
+            td_target = (r + gamma * self.v(s_prime) * done_mask).float()
             delta = td_target - self.v(s)
             delta = delta.detach().numpy()
 
@@ -99,78 +100,83 @@ class PPO(nn.Module):
             advantage_lst.reverse()
             advantage = torch.tensor(advantage_lst, dtype=torch.float)
 
-            pi = self.pi(s, softmax_dim=1)
-            pi_a = pi.gather(1,a)
-            ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))  # a/b == exp(log(a)-log(b))
+            pi = self.pi(s, softmax_dim=1).permute((0, 2, 3, 1))
+            pi_a = get_prob(pi[0][None], a[0])[None]
+            for i in range(1, pi.shape[0]):
+                pi_tmp = get_prob(pi[i][None], a[i])[None]
+                pi_a = torch.cat([pi_a, pi_tmp], dim=-1)
+            pi_a = pi_a.unsqueeze(dim=-1)
+            ratio = torch.exp(pi_a - prob_a)  # a/b == exp(log(a)-log(b))
+
+            print(ratio)
 
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-eps_clip, 1+eps_clip) * advantage
             loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(self.v(s) , td_target.detach())
 
-            if USE_INV:
-                loss += inv_loss * INV_COEF
-
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
-        
-def make_filter(ones, filt, x, y):
-    for i in range(filter_size[0]):
-        for j in range(filter_size[1]):
-            ones[x + i][y + j] = filt[i][j]
-    return ones
-    
+
+def get_action(a):
+    '''
+    input: Categorical().sample().numpy()
+    output: np.ndarray (1, 128, 100)
+    '''
+    action_list = []
+    for i in range(a.shape[1]):
+        tmp = []
+        for j in range(a.shape[2]):
+            tmp.append(action[a[0][i][j]])
+        action_list.append(tmp)
+
+    return np.array(action_list)[None]
+
+def get_prob(prob, a):
+    prob_a = 0
+    for i in range(prob.shape[1]):
+        for j in range(prob.shape[2]):
+            prob_a += torch.log(prob[0, i, j, a[0, i, j]])
+    return prob_a
+
 def main():
     # Dataset
-    done_repeat = 20
+    done_repeat = 5
 
     model = PPO()
     score = 0.0
     print_interval = 20
 
     idx = 0
+    s = train_dataset[idx][0].unsqueeze(dim=0)
+    clean = train_dataset[idx][1].unsqueeze(dim=0)
     for n_epi in range(10000):
         done = False
-        x = 0
-        y = 0
-        filtered = 0
 
         while not done:
             for t in range(T_horizon):
-                prob = model.pi(torch.from_numpy(s).float())
+                prob = model.pi(s.float()).permute((0, 2, 3, 1))
                 m = Categorical(prob)
-                a = m.sample().item()
-                selected_filter = filter[a]
+                a = m.sample().numpy()
 
-                # s_prime, r, done = step(a)
-                filt = make_filter(np.ones(data_size), selected_filter, x, y)
-                s_prime = s * filt
-                r = 0
+                residual_filter = get_action(a)
+                s_prime = s + residual_filter
+                done_repeat -= 1
 
-                if x >= data_size[0] - filter_size[0] and y >= data_size[1] - filter_size[1] :
-                    r = -1 * np.mean(np.abs(label - s_prime))
-                    filtered += 1
-                    if filtered >= done_repeat:
-                        filtered = 0
-                        done = True
-                    else:
-                        done = False
-                        x = 0
-                        y = 0
-                else:
-                    x = (x + 1) % (data_size[0] - filter_size[0])
-                    y = (y + 1) % (data_size[1] - filter_size[1])
+                r = np.mean((((clean - s) ** 2) - ((clean - s_prime) ** 2)).detach().numpy())
 
+                if done_repeat <= 0:
+                    done = True
+                    done_repeat = 5
 
-                model.put_data((s, a, r, s_prime, prob[a].item(), done))
+                model.put_data((s, a, r, s_prime, get_prob(prob, a).item(), done))
                 s = s_prime
-
-                if done:
-                    idx = (idx + 1) % len_data
-                    s = original_dataset[idx]
 
                 score += r
                 if done:
+                    idx = (idx + 1) % len(train_dataset)
+                    s = train_dataset[idx][0].unsqueeze(dim=0)
+                    clean = train_dataset[idx][1].unsqueeze(dim=0)
                     break
 
             model.train_net()

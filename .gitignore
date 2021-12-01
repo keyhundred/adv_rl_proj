@@ -1,0 +1,6 @@
+model/
+stft2/
+ppo_cart.py
+speech_model.ipynb
+test.py
+train_data_list.txt

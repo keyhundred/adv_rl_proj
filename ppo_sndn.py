@@ -1,3 +1,4 @@
+from math import fabs
 import numpy as np
 import torch
 import torch.nn as nn
@@ -18,7 +19,7 @@ gamma         = 0.98
 lmbda         = 0.95
 eps_clip      = 0.1
 K_epoch       = 3
-T_horizon     = 20
+T_horizon     = 5
 
 class PPO(nn.Module):
     def __init__(self):
@@ -26,29 +27,35 @@ class PPO(nn.Module):
         self.data = []
         self.n_action = len(filter)
         
-        self.fc1   = nn.Linear(4,256)
-        self.fc_pi = nn.Linear(256,self.n_action)
-        self.fc_v  = nn.Linear(256,1)
+        self.latent= nn.Sequential(
+            nn.Conv2d(5, 64, 3, stride=2),
+            nn.Conv2d(64, 64, 3, stride=2),
+            nn.Conv2d(64, 64, 3, stride=2),
+            nn.Conv2d(64, 5, 3, stride=2),
+            nn.Flatten(),
+        )
+        self.fc_pi = nn.Linear(3465, self.n_action)
+        self.fc_v  = nn.Linear(3465, 1)
 
-        self.fc_inv = nn.Linear(256*2, self.n_action)
+        self.fc_inv = nn.Linear(3465*2, self.n_action)
         self.ce = nn.CrossEntropyLoss()
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
     def pi(self, x, softmax_dim = 0):
-        x = F.relu(self.fc1(x))
+        x = F.relu(self.latent(x))
         x = self.fc_pi(x)
         prob = F.softmax(x, dim=softmax_dim)
         return prob
     
     def v(self, x):
-        x = F.relu(self.fc1(x))
+        x = F.relu(self.latent(x))
         v = self.fc_v(x)
         return v
 
     def inv(self, state, next_state):
-        s = self.fc1(state)
-        sp = self.fc1(next_state)
+        s = self.latent(state)
+        sp = self.latent(next_state)
         joint_state = torch.cat([s, sp], dim=1)
         pred_action = torch.relu(self.fc_inv(joint_state))
         return pred_action
@@ -61,14 +68,15 @@ class PPO(nn.Module):
         for transition in self.data:
             s, a, r, s_prime, prob_a, done = transition
             
-            s_lst.append(s)
+            s_lst.append(s.squeeze().numpy())
             a_lst.append([a])
             r_lst.append([r])
-            s_prime_lst.append(s_prime)
+            s_prime_lst.append(s_prime.squeeze().numpy())
             prob_a_lst.append([prob_a])
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
             
+        # print(s_lst)
         s,a,r,s_prime,done_mask, prob_a = torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
                                           torch.tensor(r_lst), torch.tensor(s_prime_lst, dtype=torch.float), \
                                           torch.tensor(done_lst, dtype=torch.float), torch.tensor(prob_a_lst)
@@ -78,7 +86,7 @@ class PPO(nn.Module):
     def train_net(self):
         s, a, r, s_prime, done_mask, prob_a = self.make_batch()
 
-        USE_INV = False
+        USE_INV = True
         INV_COEF = 0.1
 
         for i in range(K_epoch):
@@ -86,7 +94,7 @@ class PPO(nn.Module):
                 pred_action = self.inv(s, s_prime)
                 inv_loss = self.ce(pred_action, a.reshape((-1,))).mean()
 
-            td_target = r + gamma * self.v(s_prime) * done_mask
+            td_target = (r + gamma * self.v(s_prime) * done_mask).float()
             delta = td_target - self.v(s)
             delta = delta.detach().numpy()
 
@@ -114,24 +122,12 @@ class PPO(nn.Module):
             self.optimizer.step()
 
 def step(s, a, clean, time_step):
-    start_point = time_step * 200
-    filter_model = filter[a].predict(s[:, start_point:start_point+200])
-
-    if time_step > 0:
-        filt = np.ones((1025, start_point))
-        filt = np.append(filt, filter_model, dim=-1)
-    else:
-        filt = filter_model
-
-    if time_step < 4:
-        np.append(filt, np.ones((1025, (4 - time_step) * 200)))
-
-    s_prime = s * filt
+    s_prime = filter[a].forward(s).detach()
 
     time_step += 1
     if time_step >= 5:
         time_step = 0
-        r = -1 * np.sqrt(np.mean((s - clean) ** 2))
+        r = -1 * np.sqrt(np.mean(((s_prime-clean)**2).numpy(), keepdims=False))
         done = True
     else:
         r = 0
@@ -143,19 +139,21 @@ def step(s, a, clean, time_step):
 def main():
     model = PPO()
     score = 0.0
-    print_interval = 20
+    print_interval = 1
 
     time_step = 0
     idx = 0
+    s = train_dataset[idx][0].unsqueeze(dim=0)
+    clean = train_dataset[idx][1].unsqueeze(dim=0)
     for n_epi in range(10000):
         done = False
         while not done:
             for t in range(T_horizon):
-                prob = model.pi(torch.from_numpy(s).float())
+                prob = model.pi(s)[0]
                 m = Categorical(prob)
                 a = m.sample().item()
 
-                s_prime, r, done, time_step = step(s, a, time_step)
+                s_prime, r, done, time_step = step(s, a, clean, time_step)
 
                 model.put_data((s, a, r, s_prime, prob[a].item(), done))
                 s = s_prime
@@ -163,7 +161,9 @@ def main():
                 score += r
                 if done:
                     idx = (idx + 1) % len(train_dataset)
-                    train_dataset[idx][0].numpy()
+                    s = train_dataset[idx][0].unsqueeze(dim=0)
+                    clean = train_dataset[idx][1].unsqueeze(dim=0)
+                    break
 
             model.train_net()
 

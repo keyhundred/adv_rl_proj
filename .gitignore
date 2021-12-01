@@ -4,3 +4,4 @@ ppo_cart.py
 speech_model.ipynb
 test.py
 train_data_list.txt
+__pycache__

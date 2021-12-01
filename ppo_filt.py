@@ -7,14 +7,13 @@ from torch.distributions import Categorical
 from preproc import train_dataset, train_dataloader, val_dataloader, val_dataset, test_dataloader, test_dataset
 from denoise_model import unet_model, ae_model
 
-filter_size = [3, 3]
-data_size = [1000, 60]
+filter_size = [5, 5]
+data_size = [128, 1000]
 filter = [
     
 ]
 
-
-#Hyperparameters
+# Hyperparameters
 learning_rate = 0.0005
 gamma         = 0.98
 lmbda         = 0.95
@@ -123,11 +122,7 @@ def make_filter(ones, filt, x, y):
     
 def main():
     # Dataset
-    original_dataset = np.random.randn(300, 1000, 60)
-    noised_dataset = np.random.randn(300, 1000, 60)
-
     done_repeat = 20
-    len_data = original_dataset.size[0]
 
     model = PPO()
     score = 0.0
@@ -139,8 +134,6 @@ def main():
         x = 0
         y = 0
         filtered = 0
-        s = noised_dataset[idx]
-        label = noised_dataset[idx]
 
         while not done:
             for t in range(T_horizon):

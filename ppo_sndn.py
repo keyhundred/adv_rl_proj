@@ -6,10 +6,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
 from preproc import train_dataset, train_dataloader, val_dataloader, val_dataset, test_dataloader, test_dataset
-from denoise_model import unet_model, ae_model
+from denoise_model import unet_model, ae_model, cl_model
 
 filter = [
-    unet_model, ae_model
+    unet_model, ae_model, cl_model
 ]
 
 

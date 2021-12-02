@@ -47,20 +47,21 @@ for i in tqdm(range(len(clean_list_name))):
         if temp_clean.shape[1] <= j + 100:
             break
 
-        temp_clean = temp_clean[:, j:j+100]
-        temp_noisy = temp_noisy[:, j:j+100]
+        dat_clean = temp_clean[:, j:j+100]
+        dat_noisy = temp_noisy[:, j:j+100]
 
-        temp_clean = librosa.feature.melspectrogram(S=temp_clean**2, sr=16000)
-        temp_noisy = librosa.feature.melspectrogram(S=temp_noisy**2, sr=16000)
+        dat_clean = librosa.feature.melspectrogram(S=dat_clean**2, sr=16000)
+        dat_noisy = librosa.feature.melspectrogram(S=dat_noisy**2, sr=16000)
 
-        temp_clean = torch.Tensor(temp_clean[None])
-        temp_noisy = torch.Tensor(temp_noisy[None])
+        dat_clean = torch.Tensor(dat_clean[None])
+        dat_noisy = torch.Tensor(dat_noisy[None])
 
-        clean_data.append(temp_clean)
-        noisy_data.append(temp_noisy)
+        clean_data.append(dat_clean)
+        noisy_data.append(dat_noisy)
 
 BATCH_SIZE = 4
 
+print(f"train data : {len(clean_data)}")
 train_dataset = speech_dataset(clean = clean_data,  \
                                     noisy=noisy_data)
 

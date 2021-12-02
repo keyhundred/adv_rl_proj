@@ -38,12 +38,12 @@ class PPO(nn.Module):
         self.n_action = len(action)
 
         self.latent = nn.Sequential(
-            nn.Conv2d(1, 16, 3, padding='same'),
-            nn.Conv2d(16, 16, 3, padding='same'),
-            nn.Conv2d(16, 16, 3, padding='same'),
-            nn.Conv2d(16, 16, 3, padding='same'),
+            nn.Conv2d(1, 16, 3, padding=1),
+            nn.Conv2d(16, 16, 3, padding=1),
+            nn.Conv2d(16, 16, 3, padding=1),
+            nn.Conv2d(16, 16, 3, padding=1),
         )
-        self.fc_pi = nn.Conv2d(16, 11, 3, padding='same')
+        self.fc_pi = nn.Conv2d(16, 11, 3, padding=1)
         self.fc_v  = nn.Sequential(
             nn.Flatten(),
             nn.Linear(16*128*100, 1)

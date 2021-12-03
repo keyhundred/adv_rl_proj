@@ -38,13 +38,13 @@ clean_data = []
 noisy_data = []
 
 
-for i in tqdm(range(len(clean_list_name))):
+for i in tqdm(range(int(len(clean_list_name) * 0.1))):
     temp_clean = np.load('stft2/clean/' + clean_list_name[i])
     temp_noisy = np.load('stft2/noisy/' + noisy_list_name[i])
 
-    for j in range(0, temp_clean.shape[1], 100):
+    for j in range(0, temp_noisy.shape[1], 100):
 
-        if temp_clean.shape[1] <= j + 100:
+        if temp_noisy.shape[1] <= j + 100:
             break
 
         dat_clean = temp_clean[:, j:j+100]

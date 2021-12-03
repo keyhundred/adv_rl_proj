@@ -143,8 +143,8 @@ def main():
 
     time_step = 0
     idx = 0
-    s = train_dataset[idx][0].unsqueeze(dim=0)
-    clean = train_dataset[idx][1].unsqueeze(dim=0)
+    s = train_dataset[idx][1].unsqueeze(dim=0)
+    clean = train_dataset[idx][0].unsqueeze(dim=0)
     for n_epi in range(10000):
         done = False
         while not done:
@@ -161,15 +161,14 @@ def main():
                 score += r
                 if done:
                     idx = (idx + 1) % len(train_dataset)
-                    s = train_dataset[idx][0].unsqueeze(dim=0)
-                    clean = train_dataset[idx][1].unsqueeze(dim=0)
+                    s = train_dataset[idx][1].unsqueeze(dim=0)
+                    clean = train_dataset[idx][0].unsqueeze(dim=0)
                     break
 
             model.train_net()
 
         if n_epi%print_interval==0 and n_epi!=0:
             print("# of episode :{}, avg score : {:.1f}".format(n_epi, score/print_interval))
-            torch.save(model.state_dict(), 'models/ppo_select_filter_{}_{:.4f}'.format(n_epi, score/print_interval))
             score = 0.0
 
 

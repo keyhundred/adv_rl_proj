@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
-from preproc_mel import train_dataset
+# from preproc_mel import train_dataset
 
 data_size = [128, 100]
 action = [
@@ -146,8 +146,8 @@ def main():
     print_interval = 20
 
     idx = 0
-    s = train_dataset[idx][0].unsqueeze(dim=0)
-    clean = train_dataset[idx][1].unsqueeze(dim=0)
+    s = train_dataset[idx][1].unsqueeze(dim=0)
+    clean = train_dataset[idx][0].unsqueeze(dim=0)
     for n_epi in range(10000):
         done = False
 
@@ -166,21 +166,25 @@ def main():
                 if done_repeat <= 0:
                     done = True
                     done_repeat = 5
+                    print(np.mean(((clean - s_prime) ** 2).detach().numpy()))
 
                 model.put_data((s, a, r, s_prime, get_prob(prob, a).item(), done))
                 s = s_prime
 
+
                 score += r
                 if done:
                     idx = (idx + 1) % len(train_dataset)
-                    s = train_dataset[idx][0].unsqueeze(dim=0)
-                    clean = train_dataset[idx][1].unsqueeze(dim=0)
+                    s = train_dataset[idx][1].unsqueeze(dim=0)
+                    clean = train_dataset[idx][0].unsqueeze(dim=0)
                     break
 
             model.train_net()
 
         if n_epi%print_interval==0 and n_epi!=0:
-            print("# of episode :{}, avg score : {:.1f}".format(n_epi, score/print_interval))
+            avg_score = score/print_interval
+            print("# of episode :{}, avg score : {:.1f}".format(n_epi, avg_score))
+            torch.save(model, 'ppo_filt_model2/ppo_filt_{}_{:.4f}.pth'.format(n_epi, avg_score))
             score = 0.0
 
 

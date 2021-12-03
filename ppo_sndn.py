@@ -169,6 +169,7 @@ def main():
 
         if n_epi%print_interval==0 and n_epi!=0:
             print("# of episode :{}, avg score : {:.1f}".format(n_epi, score/print_interval))
+            torch.save(model.state_dict(), 'models/ppo_select_filter_{}_{:.4f}'.format(n_epi, score/print_interval))
             score = 0.0
 
 

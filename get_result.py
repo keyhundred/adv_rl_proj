@@ -132,16 +132,16 @@ class PPO(nn.Module):
             self.optimizer.step()
 
 model = PPO()
-model = torch.load('ppo_filt_model2/ppo_filt_80_-17.7351.pth')
+model = torch.load('ppo_filt_580_-6.9910.pth')
 
-# N_TEST = len(train_dataset)
-N_TEST = 10
-START_IDX = len(train_dataset) - 10
+N_TEST = len(train_dataset)
+# N_TEST = 10
+START_IDX = 0
 total_sp = None
 total_n = None
 for i in range(START_IDX, START_IDX + N_TEST):
-    dat = train_dataset[i][0][None]
-    clean = train_dataset[i][1].numpy()[0]
+    dat = train_dataset[i][1][None]
+    clean = train_dataset[i][0].numpy()[0]
 
     prob = model.pi(dat.float()).permute((0, 2, 3, 1))
     m = Categorical(prob)
@@ -157,9 +157,9 @@ for i in range(START_IDX, START_IDX + N_TEST):
         total_sp = np.append(total_sp, sp, axis=-1)
         
     if total_n is None:
-        total_n = clean
+        total_n = dat
     else:
-        total_n = np.append(total_n, clean, axis=-1)
+        total_n = np.append(total_n, dat, axis=-1)
 
     # plt.subplot(221)
     # plt.imshow(s)
@@ -177,7 +177,7 @@ for i in range(START_IDX, START_IDX + N_TEST):
     # plt.imshow(clean)
     # plt.colorbar()
 
-    # plt.show()
+    # plt.savefig("figs/{}.png".format(i))
     # plt.clf()
 
 print(total_sp.shape)
@@ -189,6 +189,7 @@ y = librosa.griffinlim(S, win_length=320, hop_length=160)
 print('denoised ready')
 sf.write("result.wav", y, samplerate=16000, endian='LITTLE', subtype='PCM_16')
 
+total_n = total_n[0, 0]
 print('denoised')
 
 S = librosa.feature.inverse.mel_to_stft(total_n)
